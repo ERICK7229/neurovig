@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vigilancia Epidemiológica</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<style>
+/* Layout: una columna de documento clínico; marca arriba, selector de formato, secciones numeradas como en los FR-VE. */
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --ink:#14232b; --muted:#5b6b73; --line:#d5dcdc;
+  --accent:#0d5f66; --accent-ink:#ffffff; --accent-soft:#dcedee;
+  --ok:#1d6b3a; --ok-soft:#dff1e5; --bad:#a3321f; --bad-soft:#f8e1dc;
+  --font:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e171b; --surface:#16232a; --ink:#e4ecee; --muted:#93a5ad; --line:#2a3a42;
+  --accent:#58c1c8; --accent-ink:#06282b; --accent-soft:#17383c;
+  --ok:#6fd195; --ok-soft:#173a26; --bad:#f2907d; --bad-soft:#47201a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e171b; --surface:#16232a; --ink:#e4ecee; --muted:#93a5ad; --line:#2a3a42;
+  --accent:#58c1c8; --accent-ink:#06282b; --accent-soft:#17383c;
+  --ok:#6fd195; --ok-soft:#173a26; --bad:#f2907d; --bad-soft:#47201a; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{color-scheme:light dark}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:15px/1.5 var(--font);
+  padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));padding-block:20px 56px}
+.wrap{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:16px;min-width:0}
+header.doc{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px 18px;display:grid;grid-template-columns:1fr auto;gap:6px 20px}
+.brand{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding-bottom:12px;margin-bottom:4px;border-bottom:1px solid var(--line)}
+.brand img{width:64px;height:64px;border-radius:50%;flex:none;background:#fff}
+.brand b{font:600 22px/1.1 var(--font);letter-spacing:.14em;color:var(--accent)}
+.brand span{display:block;font-size:12px;color:var(--muted);margin-top:4px}
+header.doc h1{margin:0;font-size:17px;line-height:1.3;font-weight:600;text-wrap:balance}
+header.doc .meta{font:12px/1.5 var(--mono);color:var(--muted);text-align:right;white-space:nowrap}
+header.doc .sub{grid-column:1/-1;font-size:12.5px;color:var(--muted)}
+@media(max-width:560px){header.doc{grid-template-columns:1fr}header.doc .meta{text-align:left;white-space:normal}}
+nav.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
+nav.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;font:500 14px var(--font);color:var(--muted);cursor:pointer}
+nav.tabs button[aria-selected="true"]{color:var(--accent);border-color:var(--accent)}
+.picker{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+@media(max-width:700px){.picker{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.picker button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:9px 12px;cursor:pointer;color:var(--ink);font:600 14px var(--font)}
+.picker button small{font:400 11.5px var(--mono);color:var(--muted)}
+.picker button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+section.card{background:var(--surface);border:1px solid var(--line);border-radius:6px}
+section.card>h2{margin:0;padding:11px 18px;font-size:12px;letter-spacing:.07em;text-transform:uppercase;font-weight:600;color:var(--accent);border-bottom:1px solid var(--line);background:var(--accent-soft);border-radius:6px 6px 0 0;display:flex;gap:10px}
+section.card>h2 i{font:500 12px var(--mono);font-style:normal;opacity:.8}
+.body{padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media(max-width:560px){.grid{grid-template-columns:1fr}}
+.full{grid-column:1/-1}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:500;min-width:0}
+.req::after{content:" *";color:var(--bad)}
+input[type=text],input[type=number],input[type=date],input[type=time],select,textarea{width:100%;font:15px var(--font);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-height:40px}
+textarea{resize:vertical;min-height:72px}
+input[readonly]{background:transparent;border-style:dashed;color:var(--muted);font-family:var(--mono)}
+h3{margin:4px 0 0;font-size:13px;font-weight:600;color:var(--muted)}
+.ynl{display:flex;flex-direction:column}
+.yn{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.ynl .yn:first-child{border-top:0}
+.yn .q{font-size:14px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.seg label{position:relative;cursor:pointer}
+.seg input{position:absolute;opacity:0;inset:0;cursor:pointer}
+.seg span{display:block;padding:7px 14px;font-size:13.5px;font-weight:500;color:var(--muted);min-width:64px;text-align:center;white-space:nowrap}
+.seg label+label span{border-left:1px solid var(--line)}
+.seg input:checked+span{background:var(--accent);color:var(--accent-ink)}
+.seg input.neg:checked+span{background:var(--bad);color:#fff}
+.seg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:-2px}
+.plan{display:grid;grid-template-columns:2fr 1fr 2fr auto;gap:8px;align-items:start}
+.plan input,.plan textarea{min-height:40px}
+.plan textarea{min-height:40px;height:40px}
+@media(max-width:620px){.plan{grid-template-columns:1fr;padding:10px;border:1px solid var(--line);border-radius:4px}}
+.btn{font:500 14px var(--font);border-radius:4px;padding:9px 16px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink);min-height:40px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.small{padding:5px 10px;min-height:32px;font-size:13px}
+.btn[disabled]{opacity:.55;cursor:default}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.err{background:var(--bad-soft);color:var(--bad);border:1px solid var(--bad);border-radius:4px;padding:10px 12px;font-size:14px}
+.done{text-align:center;padding:36px 20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.done b{font-size:18px}
+.done .tick{width:44px;height:44px;border-radius:50%;background:var(--ok-soft);color:var(--ok);display:grid;place-items:center;font-size:24px}
+.note{font-size:13px;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;white-space:nowrap}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+tr.row{cursor:pointer}
+tr.row:hover td{background:var(--accent-soft)}
+.tbl{overflow-x:auto}
+.pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12.5px;font-weight:500}
+.pill.pos{background:var(--bad-soft);color:var(--bad)}
+.pill.neg{background:var(--ok-soft);color:var(--ok)}
+dl.det{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:4px 16px;margin:0;font-size:13.5px}
+dl.det dt{color:var(--muted)} dl.det dd{margin:0;overflow-wrap:anywhere}
+@media(max-width:560px){dl.det{grid-template-columns:1fr}dl.det dd{margin-bottom:6px}}
+.userbar{display:flex;gap:10px;align-items:center;justify-content:flex-end;font-size:13px;color:var(--muted)}
+.login{max-width:380px;margin:0 auto;width:100%}
+.stats{display:flex;gap:22px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.stats b{font:500 20px var(--mono);color:var(--ink);margin-right:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="doc">
+    <div class="brand"><img src="logo.jpg" alt="Logo de Neurodinamia"><div><b>NEURODINAMIA</b><span>Experiencia y tecnología al servicio de tu salud</span></div></div>
+    <h1 id="h-title"></h1>
+    <div class="meta" id="h-meta"></div>
+    <div class="sub">Gestión de Aseguramiento y Calidad · Vigilancia Epidemiológica</div>
+  </header>
+  <div class="userbar" id="userbar" hidden><span id="useremail"></span><button class="btn small" id="logout" type="button">Salir</button></div>
+  <nav class="tabs" id="tabs" hidden>
+    <button id="tab-form" aria-selected="true">Nuevo registro</button>
+    <button id="tab-list" aria-selected="false">Registros</button>
+  </nav>
+  <div class="picker" id="picker" hidden role="group" aria-label="Formato"></div>
+  <div id="view-form"></div>
+  <div id="view-list" hidden></div>
+  <footer class="note" id="foot" hidden style="text-align:center"><a href="#" id="adminlink" style="color:var(--muted)">Acceso de administración</a></footer>
+</div>
+
+<script>
+(function(){
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------- Definición de campos ---------- */
+const F=(l,k,o={})=>({c:'f',t:'text',l,k,...o});
+const Dt=(l,k,o)=>F(l,k,{t:'date',...o});
+const Tm=(l,k)=>F(l,k,{t:'time'});
+const Nu=(l,k,o)=>F(l,k,{t:'number',...o});
+const Se=(l,k,opts,o)=>F(l,k,{t:'select',opts,...o});
+const Ta=(l,k)=>F(l,k,{t:'textarea',full:1});
+const Y=(l,k,p='Sí',n='No')=>({c:'y',l,k,p,n});
+const Ys=(a,p,n)=>a.map(([l,k])=>Y(l,k,p,n));
+const H=t=>({c:'h',t});
+const PLAN={c:'plan'};
+const SEXO=['Femenino','Masculino','Otro'];
+const CUMPLE=['Cumple','No cumple'];
+
+const paciente=()=>[F('Nombre del paciente','nombre',{req:1,full:1}),F('Número de historia clínica','hc',{req:1}),Se('Sexo','sexo',SEXO,{req:1}),Nu('Edad (años)','edad',{req:1}),F('Servicio / unidad','servicio',{req:1}),Dt('Fecha de ingreso hospitalario','f_ingreso_hosp'),Dt('Fecha de ingreso a UCI','f_ingreso_uci'),Dt('Fecha de egreso (si aplica)','f_egreso')];
+const analisis=()=>[F('Tipo de evento','tipo_evento',{full:1}),Y('Asociado a la atención en salud','asociado_ais'),Ta('Causa probable','causa'),Ta('Factores contribuyentes','contribuyentes'),H('Plan de mejora'),PLAN,Ta('Conclusión del análisis','conclusion')];
+const equipo=med=>[F(med,'eq_medico'),F('Enfermería','eq_enfermeria'),F('Control de infecciones','eq_infecciones'),Dt('Fecha del análisis','f_analisis')];
+const medidas=a=>Ys(a,...CUMPLE);
+
+const FORMS=[
+{id:'itsac',short:'ITS-AC',code:'FR-VE-03',col:'its_ac',
+ title:'Prevención de infecciones del torrente sanguíneo asociadas a catéter central (ITS-AC)',
+ cols:{c4:'servicio',c4l:'Servicio',c5:'dias_cateter',c5l:'Días cat.',c6:'hemocultivo',c6l:'Hemocultivo'},
+ calcs:[['dias_cateter','f_insercion','f_retiro'],['dias_infeccion','f_insercion','f_dx']],
+ order:[['f_insercion','f_retiro','La fecha de retiro es anterior a la de inserción.'],['f_insercion','f_dx','La fecha de diagnóstico es anterior a la de inserción.'],['f_ingreso_hosp','f_egreso','La fecha de egreso es anterior a la de ingreso.']],
+ sections:[
+  ['Datos del paciente',paciente()],
+  ['Información del catéter',[H('Tipo de catéter'),...Ys([['Catéter venoso central','cat_central'],['Catéter venoso periférico','cat_periferico'],['Catéter de hemodiálisis','cat_hemodialisis'],['Otro','cat_otro']]),
+    H('Sitio de inserción'),...Ys([['Yugular','sitio_yugular'],['Subclavio','sitio_subclavio'],['Femoral','sitio_femoral'],['Otro','sitio_otro']]),
+    Dt('Fecha de inserción del catéter','f_insercion'),Dt('Fecha de retiro del catéter','f_retiro'),F('Días de permanencia del catéter','dias_cateter',{ro:1}),F('Profesional que realizó la inserción','prof_insercion')]],
+  ['Evaluación de medidas preventivas',medidas([['Higiene de manos','mp_manos'],['Técnica aséptica durante inserción','mp_aseptica'],['Uso de barreras máximas de protección','mp_barreras'],['Antisepsia con clorhexidina','mp_clorhexidina'],['Evaluación diaria de necesidad del catéter','mp_evaluacion'],['Curación adecuada del sitio de inserción','mp_curacion']])],
+  ['Información del evento infeccioso',[Dt('Fecha de diagnóstico de la infección','f_dx'),F('Días desde la inserción hasta la infección','dias_infeccion',{ro:1}),
+    H('Signos y síntomas presentados'),...Ys([['Fiebre (>38 °C)','sx_fiebre'],['Escalofríos','sx_escalofrios'],['Eritema en sitio de inserción','sx_eritema'],['Secreción en sitio de inserción','sx_secrecion']]),F('Otros signos o síntomas','sx_otros',{full:1})]],
+  ['Resultados microbiológicos',[Y('Hemocultivo','hemocultivo','Positivo','Negativo'),Dt('Fecha de toma del hemocultivo','f_hemocultivo'),F('Microorganismo aislado','microorganismo'),Ta('Antibiograma','antibiograma')]],
+  ['Factores de riesgo identificados',[H('Relacionados con el paciente'),...Ys([['Inmunosupresión','fr_inmuno'],['Diabetes','fr_diabetes'],['Enfermedad crónica','fr_cronica'],['Estancia prolongada en UCI','fr_estancia']]),
+    H('Relacionados con el dispositivo'),...Ys([['Catéter por tiempo prolongado','fd_tiempo'],['Manipulación frecuente del catéter','fd_manipulacion'],['Técnica de inserción inadecuada','fd_tecnica'],['Falta de asepsia en manejo del catéter','fd_asepsia']]),F('Otros factores','fr_otros',{full:1})]],
+  ['Análisis del evento',analisis()],
+  ['Equipo que realiza el análisis',equipo('Médico')]]},
+
+{id:'nav',short:'NAV',code:'FR-VE-02',col:'nav',
+ title:'Prevención de neumonía asociada a ventilador mecánico (NAV)',
+ cols:{c4:'servicio',c4l:'Servicio',c5:'duracion_vm',c5l:'Días VM',c6:'asociado_ais',c6l:'Asociado a atención'},
+ calcs:[['duracion_vm','f_inicio_vm','f_dx_nav',1]],
+ order:[['f_inicio_vm','f_dx_nav','La fecha de diagnóstico es anterior al inicio de la ventilación.'],['f_ingreso_hosp','f_egreso','La fecha de egreso es anterior a la de ingreso.']],
+ sections:[
+  ['Datos del paciente',paciente()],
+  ['Información sobre ventilación mecánica',[Dt('Fecha de inicio de ventilación mecánica','f_inicio_vm'),
+    H('Tipo de ventilación'),Y('Invasiva','vm_invasiva'),Y('No invasiva','vm_no_invasiva'),
+    Nu('Duración de ventilación mecánica (días)','duracion_vm'),Dt('Fecha de diagnóstico de NAV','f_dx_nav'),F('Profesional que realiza el procedimiento','prof_procedimiento',{full:1})]],
+  ['Cumplimiento del paquete de prevención (bundle)',medidas([['Elevación de cabecera 30–45°','mp_cabecera'],['Higiene oral con clorhexidina','mp_oral'],['Evaluación diaria de extubación','mp_extubacion'],['Aspiración subglótica','mp_subglotica'],['Manejo adecuado del circuito ventilatorio','mp_circuito'],['Lavado de manos','mp_manos']])],
+  ['Criterios clínicos',[H('Marcar los presentes'),...Ys([['Fiebre (>38 °C)','cc_fiebre'],['Hipotermia (<36 °C)','cc_hipotermia'],['Leucocitosis','cc_leucocitosis'],['Leucopenia','cc_leucopenia'],['Secreciones traqueales purulentas','cc_secreciones'],['Deterioro de la oxigenación','cc_oxigenacion'],['Cambios en la auscultación pulmonar','cc_auscultacion']])]],
+  ['Criterios radiológicos',[H('Marcar los presentes'),...Ys([['No invasiva','rx_no_invasiva'],['Consolidación pulmonar','rx_consolidacion'],['Derrame pleural','rx_derrame']]),Dt('Fecha del estudio','f_estudio_rx'),Ta('Resultado del informe radiológico','resultado_rx')]],
+  ['Resultados microbiológicos',[H('Tipo de muestra'),...Ys([['Aspirado traqueal','muestra_aspirado'],['Lavado broncoalveolar','muestra_lba'],['Hemocultivo','muestra_hemocultivo']]),F('Microorganismo aislado','microorganismo'),Dt('Fecha del resultado','f_resultado'),Ta('Antibiograma','antibiograma')]],
+  ['Factores de riesgo identificados',[H('Marcar los presentes'),...Ys([['Ventilación mecánica prolongada','fr_vm_prolongada'],['Reintubación','fr_reintubacion'],['Aspiración de secreciones','fr_aspiracion'],['Posición supina prolongada','fr_supina'],['Sedación profunda','fr_sedacion'],['Uso previo de antibióticos','fr_antibioticos'],['Enfermedad pulmonar previa','fr_pulmonar']]),F('Otros factores','fr_otros',{full:1})]],
+  ['Análisis del evento',analisis()],
+  ['Equipo que realiza el análisis',equipo('Médico')]]},
+
+{id:'istu',short:'ISTU-AC',code:'FR-VE-04',col:'istu_ac',
+ title:'Infección sintomática del tracto urinario asociada a catéter (ISTU-AC)',
+ cols:{c4:'servicio',c4l:'Servicio',c5:'dias_cateter',c5l:'Días cat.',c6:'urocultivo',c6l:'Urocultivo'},
+ calcs:[['dias_cateter','f_insercion','f_retiro'],['dias_infeccion','f_insercion','f_dx']],
+ order:[['f_insercion','f_retiro','La fecha de retiro es anterior a la de inserción.'],['f_insercion','f_dx','La fecha de diagnóstico es anterior a la de inserción.'],['f_ingreso_hosp','f_egreso','La fecha de egreso es anterior a la de ingreso.']],
+ sections:[
+  ['Datos del paciente',paciente()],
+  ['Información del catéter',[H('Tipo de catéter'),Y('Catéter urinario permanente','cat_permanente'),Y('Catéter urinario intermitente','cat_intermitente'),
+    Dt('Fecha de inserción del catéter','f_insercion'),Dt('Fecha de retiro del catéter','f_retiro'),F('Días de permanencia del catéter','dias_cateter',{ro:1}),F('Profesional que realizó el procedimiento','prof_procedimiento'),
+    H('Indicación del catéter'),...Ys([['Retención urinaria','ind_retencion'],['Monitoreo estricto de diuresis','ind_diuresis'],['Procedimiento quirúrgico','ind_quirurgico'],['Paciente crítico','ind_critico']]),F('Otra indicación','ind_otro',{full:1})]],
+  ['Evaluación de medidas preventivas',medidas([['Higiene de manos','mp_manos'],['Técnica aséptica durante inserción','mp_aseptica'],['Sistema de drenaje cerrado','mp_drenaje_cerrado'],['Bolsa colectora por debajo de la vejiga','mp_bolsa'],['Fijación adecuada del catéter','mp_fijacion'],['Evaluación diaria de necesidad del catéter','mp_evaluacion']])],
+  ['Información del evento infeccioso',[Dt('Fecha de diagnóstico de ITU','f_dx'),F('Días desde la inserción hasta la infección','dias_infeccion',{ro:1}),
+    H('Signos y síntomas presentes'),...Ys([['Fiebre (>38 °C)','sx_fiebre'],['Dolor suprapúbico','sx_suprapubico'],['Dolor lumbar','sx_lumbar'],['Disuria','sx_disuria'],['Urgencia urinaria','sx_urgencia'],['Orina turbia o mal olor','sx_orina']]),F('Otros signos o síntomas','sx_otros',{full:1})]],
+  ['Resultados microbiológicos',[Y('Urocultivo','urocultivo','Positivo','Negativo'),Dt('Fecha de toma de muestra','f_muestra'),F('Microorganismo aislado','microorganismo'),F('Recuento bacteriano','recuento'),Ta('Antibiograma','antibiograma')]],
+  ['Factores de riesgo identificados',[H('Relacionados con el paciente'),...Ys([['Inmunosupresión','fr_inmuno'],['Diabetes','fr_diabetes'],['Enfermedad crónica','fr_cronica'],['Estancia prolongada en UCI','fr_estancia']]),
+    H('Relacionados con el dispositivo'),...Ys([['Catéter urinario prolongado','fd_prolongado'],['Sistema de drenaje abierto','fd_abierto'],['Manipulación frecuente del catéter','fd_manipulacion'],['Técnica de inserción inadecuada','fd_tecnica']]),F('Otros factores','fr_otros',{full:1})]],
+  ['Análisis del evento',analisis()],
+  ['Equipo que realiza el análisis',equipo('Médico')]]},
+
+{id:'isq',short:'ISQ',code:'FR-VE-05',col:'isq',
+ title:'Prevención de infecciones del sitio operatorio (ISQ)',
+ cols:{c4:'procedimiento_qx',c4l:'Procedimiento',c5:'dias_cirugia',c5l:'Días a dx',c6:'asociado_ais',c6l:'Asociado a atención'},
+ calcs:[['dias_cirugia','f_intervencion','f_dx']],
+ order:[['f_ingreso_hosp','f_intervencion','La fecha de intervención es anterior al ingreso.'],['f_intervencion','f_dx','La fecha de diagnóstico es anterior a la cirugía.'],['f_ingreso_hosp','f_egreso','La fecha de egreso es anterior a la de ingreso.']],
+ sections:[
+  ['Datos del paciente',[F('Nombre del paciente','nombre',{req:1,full:1}),F('EPS','eps'),F('Número de historia clínica','hc',{req:1}),Nu('Edad (años)','edad',{req:1}),Se('Sexo','sexo',SEXO,{req:1}),Nu('Peso (kg)','peso'),
+    Dt('Fecha de ingreso hospitalario','f_ingreso_hosp'),Dt('Fecha de intervención','f_intervencion'),Dt('Fecha de ingreso a la unidad / servicio de traslado','f_ingreso_unidad'),
+    F('Procedimiento quirúrgico','procedimiento_qx',{req:1,full:1}),
+    Tm('Hora de ingreso','hr_ingreso'),Tm('Hora de inducción','hr_induccion'),Tm('Hora de inicio','hr_inicio'),Tm('Hora de terminación','hr_terminacion'),Tm('Hora final','hr_final'),
+    Y('Tipo de cirugía','tipo_cirugia','Electiva','Urgencia'),Dt('Fecha de egreso (si aplica)','f_egreso')]],
+  ['Información del procedimiento quirúrgico',[F('Diagnóstico preoperatorio','dx_preop',{full:1}),F('Tiempo de ayuno','tiempo_ayuno'),
+    Y('Higiene de manos','higiene_manos'),Y('Ducha preintervención','ducha_pre'),Y('Sitio anatómico','sitio_anatomico','Abdominal','No abdominal'),Y('Profilaxis','profilaxis'),
+    Tm('Hora de profilaxis','hr_profilaxis'),F('Antibiótico','antibiotico'),F('Dosis','dosis'),Y('Refuerzo de la profilaxis','refuerzo_profilaxis'),
+    F('Remoción de vello','remocion_vello'),F('Equipo de rasurado','equipo_rasurado'),Y('Control de temperatura intraoperatoria','control_temp'),Y('Control de glicemia','control_glicemia'),
+    F('Solución antiséptica','solucion_antiseptica'),F('Tipo de anestesia','tipo_anestesia'),Se('ASA','asa',['I','II','III','IV','V','VI']),
+    H('Clasificación de la herida quirúrgica'),...Ys([['Limpia','herida_limpia'],['Limpia-contaminada','herida_limpia_cont'],['Contaminada','herida_contaminada'],['Sucia o infectada','herida_sucia']])]],
+  ['Equipo del acto quirúrgico',[F('Cirujanos','eq_cirujanos'),F('Enfermería','eq_qx_enfermeria'),F('Instrumentadora','eq_instrumentadora'),F('Médico general (ayudantía quirúrgica)','eq_ayudante'),F('Anestesiólogo','eq_anestesiologo'),F('Otros','eq_qx_otros')]],
+  ['Información del evento infeccioso',[Dt('Fecha de diagnóstico de infección','f_dx'),F('Días entre cirugía y diagnóstico','dias_cirugia',{ro:1}),
+    H('Tipo de infección del sitio operatorio'),...Ys([['Superficial','inf_superficial'],['Profunda','inf_profunda'],['Órgano / espacio','inf_organo']]),
+    H('Signos y síntomas presentes'),...Ys([['Dolor o sensibilidad','sx_dolor'],['Eritema','sx_eritema'],['Edema','sx_edema'],['Calor local','sx_calor'],['Secreción purulenta','sx_secrecion'],['Fiebre','sx_fiebre'],['Dehiscencia de herida','sx_dehiscencia']]),F('Otros signos o síntomas','sx_otros',{full:1})]],
+  ['Resultados microbiológicos',[F('Muestra tomada','muestra'),Dt('Fecha de toma de muestra','f_muestra'),F('Microorganismo aislado','microorganismo',{full:1}),Ta('Antibiograma','antibiograma')]],
+  ['Factores de riesgo identificados',[H('Relacionados con el paciente'),...Ys([['Inmunosupresión','fr_inmuno'],['Diabetes','fr_diabetes'],['Desnutrición','fr_desnutricion'],['Obesidad','fr_obesidad'],['Tabaquismo','fr_tabaquismo']]),
+    H('Relacionados con el procedimiento'),...Ys([['Cirugía prolongada','fp_prolongada'],['Profilaxis antibiótica inadecuada','fp_profilaxis'],['Técnica quirúrgica','fp_tecnica'],['Uso de drenajes','fp_drenajes'],['Reintervención quirúrgica','fp_reintervencion']]),F('Otros factores','fr_otros',{full:1})]],
+  ['Análisis del evento',analisis()],
+  ['Equipo que realiza el análisis',equipo('Médicos')]]}
+];
+FORMS.forEach(fm=>{
+  fm.fields=[];
+  fm.sections.forEach(([,items])=>items.forEach(it=>{
+    if(it.c==='f'||it.c==='y')fm.fields.push({k:it.k,l:it.l,req:!!it.req});
+    if(it.c==='plan')fm.fields.push({k:'plan',l:'Plan de mejora'});
+  }));
+});
+const byId=Object.fromEntries(FORMS.map(x=>[x.id,x]));
+
+/* ---------- Render del formulario ---------- */
+function ctl(it){
+  const ro=it.ro?' readonly tabindex="-1"':'';
+  if(it.t==='textarea')return `<textarea id="${it.k}" name="${it.k}"></textarea>`;
+  if(it.t==='select')return `<select id="${it.k}" name="${it.k}"><option value="">Seleccionar</option>${it.opts.map(o=>`<option>${o}</option>`).join('')}</select>`;
+  return `<input id="${it.k}" name="${it.k}" type="${it.t}"${ro}${it.t==='number'?' min="0" step="any" inputmode="decimal"':''}>`;
+}
+function field(it){return `<label class="f${it.full?' full':''}" for="${it.k}"><span class="${it.req?'req':''}">${esc(it.l)}</span>${ctl(it)}</label>`;}
+function yn(it){return `<div class="yn"><div class="q" id="q-${it.k}">${esc(it.l)}</div><div class="seg" role="radiogroup" aria-labelledby="q-${it.k}">
+  <label><input type="radio" name="${it.k}" value="${it.p}"><span>${it.p}</span></label>
+  <label><input type="radio" name="${it.k}" value="${it.n}" class="neg"><span>${it.n}</span></label></div></div>`;}
+const getCode=()=>{try{return localStorage.getItem('neuro_codigo')||'';}catch(_){return '';}};
+const setCode=c=>{try{localStorage.setItem('neuro_codigo',c);}catch(_){}};
+function buildForm(fm){
+  const secs=fm.sections.map(([title,items],i)=>{
+    let out='',buf=[],mode='';
+    const flush=()=>{if(!buf.length)return;out+=mode==='g'?`<div class="grid">${buf.join('')}</div>`:`<div class="ynl">${buf.join('')}</div>`;buf=[];mode='';};
+    items.forEach(it=>{
+      if(it.c==='f'){if(mode!=='g')flush();mode='g';buf.push(field(it));}
+      else if(it.c==='y'){if(mode!=='y')flush();mode='y';buf.push(yn(it));}
+      else{flush();
+        if(it.c==='h')out+=`<h3>${esc(it.t)}</h3>`;
+        if(it.c==='plan')out+=`<div id="plan" style="display:flex;flex-direction:column;gap:8px"></div><div><button type="button" class="btn small" id="addplan">+ Agregar acción</button></div>`;}
+    });
+    flush();
+    return `<section class="card"><h2><i>${i+1}</i>${esc(title)}</h2><div class="body">${out}</div></section>`;
+  }).join('');
+  return `<form id="form" novalidate style="display:flex;flex-direction:column;gap:16px"><section class="card"><div class="body"><label class="f" for="codigo"><span class="req">Código de acceso del servicio</span><input id="codigo" name="codigo" type="password" autocomplete="off" value="${esc(getCode())}"></label><span class="note">Te lo entrega el administrador. Se recuerda en este dispositivo.</span></div></section>${secs}
+    <div id="formerr" class="err" hidden></div>
+    <div class="bar"><button type="submit" class="btn primary" id="send">Guardar registro</button><span class="note">Los campos con * son obligatorios.</span></div></form>`;
+}
+function planRow(v={}){
+  const d=document.createElement('div');d.className='plan';
+  d.innerHTML=`<textarea placeholder="Acción de mejora" aria-label="Acción de mejora" data-k="accion">${esc(v.accion)}</textarea>
+    <input type="date" aria-label="Fecha" data-k="fecha" value="${esc(v.fecha)}">
+    <textarea placeholder="Seguimiento" aria-label="Seguimiento" data-k="seguimiento">${esc(v.seguimiento)}</textarea>
+    <button type="button" class="btn small" aria-label="Quitar acción">Quitar</button>`;
+  d.querySelector('button').onclick=()=>d.remove();
+  return d;
+}
+const dayDiff=(a,b)=>{if(!a||!b)return'';const n=Math.round((new Date(b)-new Date(a))/864e5);return n>=0?String(n):'';};
+
+function wireForm(fm){
+  const form=document.getElementById('form');
+  const plan=document.getElementById('plan');
+  plan.append(planRow());
+  document.getElementById('addplan').onclick=()=>plan.append(planRow());
+  const manual=new Set();
+  fm.calcs.forEach(([k,a,b,soft])=>{
+    const el=form.elements[k];
+    if(soft)el.addEventListener('input',()=>manual.add(k));
+    const run=()=>{if(soft&&manual.has(k))return;el.value=dayDiff(form.elements[a].value,form.elements[b].value);};
+    form.elements[a].addEventListener('change',run);form.elements[b].addEventListener('change',run);
+  });
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const err=document.getElementById('formerr');err.hidden=true;
+    const rec={};
+    fm.fields.forEach(({k})=>{if(k!=='plan')rec[k]=(form.elements[k]?.value??'').toString().trim();});
+    form.querySelectorAll('input[type=radio]:checked').forEach(r=>rec[r.name]=r.value);
+    const codigo=(form.elements.codigo.value||'').trim();
+    const missing=fm.fields.filter(x=>x.req&&!rec[x.k]).map(x=>x.l);
+    const problems=[];
+    if(!codigo)problems.unshift('Escribe el código de acceso del servicio.');
+    if(missing.length)problems.push('Falta completar: '+missing.join(', ')+'.');
+    fm.order.forEach(([a,b,msg])=>{if(rec[a]&&rec[b]&&rec[b]<rec[a])problems.push(msg);});
+    if(problems.length){err.textContent=problems.join(' ');err.hidden=false;err.scrollIntoView({block:'center'});return;}
+    rec.plan=[...plan.querySelectorAll('.plan')].map(r=>({accion:r.querySelector('[data-k=accion]').value.trim(),fecha:r.querySelector('[data-k=fecha]').value,seguimiento:r.querySelector('[data-k=seguimiento]').value.trim()})).filter(r=>r.accion||r.seguimiento);
+    rec.formato=fm.code;
+    const btn=document.getElementById('send');btn.disabled=true;btn.textContent='Guardando…';
+    try{
+      const {error:insErr}=await SB.from('registros').insert({formato:fm.code,datos:{...rec,codigo}});
+      if(insErr)throw insErr;
+      setCode(codigo);
+      document.getElementById('view-form').innerHTML=`<section class="card"><div class="done"><div class="tick">✓</div><b>Registro guardado</b><span class="note">${esc(fm.short)} · ${esc(rec.nombre)} · HC ${esc(rec.hc)}</span><button class="btn primary" id="again">Registrar otro paciente</button></div></section>`;
+      document.getElementById('again').onclick=showForm;
+    }catch(ex){
+      btn.disabled=false;btn.textContent='Guardar registro';
+      err.textContent=(ex&&ex.message==='codigo_invalido')?'El código de acceso no es correcto. Pídelo al administrador.':(ex&&(ex.code==='42501'||ex.status===401||ex.status===403))?'No se pudo guardar por permisos. Recarga la página e inténtalo de nuevo.':'No se pudo guardar. Revisa la conexión e inténtalo de nuevo.';
+      err.hidden=false;
+    }
+  });
+}
+
+/* ---------- Estado, selector y cabecera ---------- */
+let SB=null,UID='',EMAIL='',CUR=FORMS[0],VIEW='f',IS_ADMIN=false;
+const COUNTS={};
+function paintHeader(){
+  document.getElementById('h-title').textContent=CUR.title;
+  document.getElementById('h-meta').innerHTML=`${CUR.code} · Versión 01<br>Abril 2026`;
+}
+function paintPicker(){
+  const p=document.getElementById('picker');
+  p.innerHTML=FORMS.map(fm=>`<button type="button" data-id="${fm.id}" aria-pressed="${fm===CUR}">${fm.short}<small>${fm.code}${VIEW==='l'&&COUNTS[fm.id]!=null?' · '+COUNTS[fm.id]+' reg.':''}</small></button>`).join('');
+}
+document.getElementById('picker').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b||!SB)return;
+  CUR=byId[b.dataset.id];paintHeader();paintPicker();
+  if(VIEW==='f')showForm();else LIST.render();
+});
+function showForm(){
+  document.getElementById('view-form').innerHTML=buildForm(CUR);
+  wireForm(CUR);
+}
+
+/* ---------- Vista de registros (administradores) ---------- */
+const stamp=()=>new Date().toISOString().slice(0,10);
+function fmtVal(r,k){
+  if(k==='plan')return (r.plan||[]).map((p,i)=>`${i+1}. ${p.accion||''}${p.fecha?' ('+p.fecha+')':''}${p.seguimiento?' – '+p.seguimiento:''}`).join('\n');
+  return r[k]??'';
+}
+function rowsFor(fm,recs){
+  return [['Fecha de registro',...fm.fields.map(x=>x.l)],...recs.map(r=>[localStamp(r.creado),...fm.fields.map(x=>fmtVal(r,x.k))])];
+}
+const toCSV=rows=>'\ufeff'+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+function download(filename,data,mime){
+  const blob=new Blob([data],{type:mime});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+const p2=n=>String(n).padStart(2,'0');
+const localDay=s=>{if(!s)return'';const d=new Date(s);return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;};
+const localStamp=s=>{if(!s)return'';const d=new Date(s);return `${localDay(s)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;};
+const pillFor=v=>v==='Positivo'||v==='Sí'?`<span class="pill pos">${v}</span>`:v==='Negativo'||v==='No'?`<span class="pill neg">${v}</span>`:'<span class="note">–</span>';
+
+const LIST=(function(){
+  const RECS={},st={open:null,armed:null,q:''};
+  FORMS.forEach(fm=>RECS[fm.id]=[]);
+  let ready=false,v,tb;
+  function note(t){const n=document.getElementById('listnote');if(n)n.textContent=t;}
+  function render(){
+    if(!ready)return;
+    const fm=CUR,recs=RECS[fm.id],c=fm.cols,t=st.q.toLowerCase();
+    v.querySelector('#th').innerHTML=`<tr><th>Registro</th><th>Paciente</th><th>HC</th><th>${c.c4l}</th><th>${c.c5l}</th><th>${c.c6l}</th></tr>`;
+    const rows=recs.filter(r=>!t||[r.nombre,r.hc,r[c.c4]].join(' ').toLowerCase().includes(t));
+    v.querySelector('#stats').innerHTML=`<span><b>${recs.length}</b>registros</span><span><b>${recs.filter(r=>r.asociado_ais==='Sí').length}</b>asociados a la atención</span>`;
+    if(!rows.length){tb.innerHTML=`<tr><td colspan="6" class="note" style="padding:24px 10px">${recs.length?'Ningún registro coincide con la búsqueda.':'Aún no hay registros de este formato. Aparecerán aquí cuando el personal guarde el primero.'}</td></tr>`;return;}
+    tb.innerHTML=rows.map(r=>{
+      let h=`<tr class="row" data-id="${r._id}" tabindex="0"><td class="n">${esc(localDay(r.creado))}</td><td>${esc(r.nombre)}</td><td class="n">${esc(r.hc)}</td><td>${esc(r[c.c4])}</td><td class="n">${esc(r[c.c5])}</td><td>${pillFor(r[c.c6])}</td></tr>`;
+      if(st.open===r._id){
+        const dl=fm.fields.map(x=>{const val=fmtVal(r,x.k);return val===''?'':`<dt>${esc(x.l)}</dt><dd>${esc(val).replace(/\n/g,'<br>')}</dd>`;}).join('');
+        h+=`<tr><td colspan="6" style="background:var(--bg)"><dl class="det">${dl}</dl><div class="bar" style="margin-top:12px"><button class="btn small danger" data-del="${r._id}">${st.armed===r._id?'Confirmar eliminación':'Eliminar registro'}</button></div></td></tr>`;
+      }
+      return h;
+    }).join('');
+  }
+  async function load(fm){
+    let all=[],from=0;const size=1000;
+    for(;;){
+      const {data,error}=await SB.from('registros').select('id,creado,datos').eq('formato',fm.code).order('creado',{ascending:false}).range(from,from+size-1);
+      if(error)throw error;
+      all=all.concat(data);
+      if(data.length<size)break;
+      from+=size;
+    }
+    RECS[fm.id]=all.map(r=>({...r.datos,_id:r.id,creado:r.creado}));
+    COUNTS[fm.id]=RECS[fm.id].length;
+  }
+  async function refresh(){
+    note('Cargando registros…');
+    try{await Promise.all(FORMS.map(load));note('');}catch(e){note('No se pudieron cargar los registros. Revisa tu conexión.');}
+    paintPicker();render();
+  }
+  function init(){
+    v=document.getElementById('view-list');
+    v.innerHTML=`<section class="card"><div class="body">
+      <div class="stats" id="stats"></div>
+      <div class="bar"><input type="text" id="search" placeholder="Buscar por paciente, historia clínica o servicio" aria-label="Buscar" style="flex:1;min-width:200px">
+        <button class="btn" id="reload">Actualizar</button>
+        <button class="btn primary" id="xlsx">Descargar Excel (todos)</button><button class="btn" id="csv">CSV de este formato</button></div>
+      <div class="note" id="listnote" aria-live="polite"></div>
+      <div class="tbl"><table><thead id="th"></thead><tbody id="tb"></tbody></table></div></div></section>`;
+    tb=v.querySelector('#tb');ready=true;
+    tb.addEventListener('click',async e=>{
+      const del=e.target.closest('[data-del]');
+      if(del){const id=del.dataset.del;
+        if(st.armed!==id){st.armed=id;render();return;}
+        const {error}=await SB.from('registros').delete().eq('id',id);
+        if(error){note('No se pudo eliminar.');return;}
+        RECS[CUR.id]=RECS[CUR.id].filter(r=>r._id!==id);COUNTS[CUR.id]=RECS[CUR.id].length;
+        st.open=null;st.armed=null;paintPicker();render();return;}
+      const row=e.target.closest('tr.row');if(row){st.open=st.open===row.dataset.id?null:row.dataset.id;st.armed=null;render();}
+    });
+    tb.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.classList.contains('row'))e.target.click();});
+    v.querySelector('#search').addEventListener('input',e=>{st.q=e.target.value;render();});
+    v.querySelector('#reload').onclick=refresh;
+    v.querySelector('#csv').onclick=()=>RECS[CUR.id].length?download(`${CUR.short}_registros_${stamp()}.csv`,toCSV(rowsFor(CUR,RECS[CUR.id])),'text/csv;charset=utf-8'):note('No hay registros de este formato para descargar.');
+    v.querySelector('#xlsx').onclick=()=>{
+      const withData=FORMS.filter(fm=>RECS[fm.id].length);
+      if(!withData.length)return note('No hay registros para descargar.');
+      if(!window.XLSX)return note('No se cargó el generador de Excel. Usa la descarga CSV.');
+      const wb=XLSX.utils.book_new();
+      withData.forEach(fm=>{const rows=rowsFor(fm,RECS[fm.id]);const ws=XLSX.utils.aoa_to_sheet(rows);
+        ws['!cols']=rows[0].map(h=>({wch:Math.min(40,Math.max(14,String(h).length))}));XLSX.utils.book_append_sheet(wb,ws,fm.short);});
+      download(`Vigilancia_epidemiologica_${stamp()}.xlsx`,XLSX.write(wb,{type:'array',bookType:'xlsx'}),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    };
+    refresh();
+  }
+  return {init,render,note,refresh};
+})();
+
+function tabs(){
+  if(!IS_ADMIN)return;
+  document.getElementById('tabs').hidden=false;
+  const tf=document.getElementById('tab-form'),tl=document.getElementById('tab-list');
+  const sel=a=>{VIEW=a;tf.setAttribute('aria-selected',a==='f');tl.setAttribute('aria-selected',a==='l');
+    document.getElementById('view-form').hidden=a!=='f';document.getElementById('view-list').hidden=a!=='l';
+    paintPicker();if(a==='l')LIST.refresh();};
+  tf.onclick=()=>sel('f');tl.onclick=()=>sel('l');
+  LIST.init();
+}
+
+/* ---------- Sesión (Supabase Auth) ---------- */
+function showLogin(msg){
+  document.getElementById('picker').hidden=true;
+  document.getElementById('userbar').hidden=true;
+  document.getElementById('foot').hidden=true;
+  const vf=document.getElementById('view-form');
+  vf.innerHTML=`<section class="card login"><h2><i>→</i>Ingreso del personal</h2><form id="loginform" class="body" novalidate>
+    <label class="f" for="email"><span>Correo</span><input id="email" type="text" inputmode="email" autocomplete="username"></label>
+    <label class="f" for="pass"><span>Contraseña</span><input id="pass" type="password" autocomplete="current-password" style="width:100%;font:15px var(--font);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:8px 10px;min-height:40px"></label>
+    <div id="loginerr" class="err" ${msg?'':'hidden'}>${esc(msg||'')}</div>
+    <button class="btn primary" type="submit" id="loginbtn">Entrar</button>
+    <span class="note">Solo para administradores.</span><button class="btn small" type="button" id="backform">Volver al formulario</button></form></section>`;
+  document.getElementById('backform').onclick=()=>location.reload();
+  document.getElementById('loginform').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const btn=document.getElementById('loginbtn'),err=document.getElementById('loginerr');
+    btn.disabled=true;btn.textContent='Entrando…';err.hidden=true;
+    const {data,error}=await SB.auth.signInWithPassword({email:document.getElementById('email').value.trim(),password:document.getElementById('pass').value});
+    if(error||!data.session){btn.disabled=false;btn.textContent='Entrar';err.textContent='Correo o contraseña incorrectos.';err.hidden=false;return;}
+    await start(data.session);
+  });
+}
+async function start(session){
+  UID=session.user.id;EMAIL=session.user.email||'';
+  document.getElementById('useremail').textContent=EMAIL;
+  document.getElementById('userbar').hidden=false;
+  document.getElementById('picker').hidden=false;
+  document.getElementById('foot').hidden=true;
+  const {data}=await SB.from('admins').select('user_id').eq('user_id',UID);
+  IS_ADMIN=!!(data&&data.length);
+  showForm();tabs();
+}
+document.getElementById('logout').onclick=async()=>{if(SB)await SB.auth.signOut();location.reload();};
+
+(async function boot(){
+  paintHeader();paintPicker();
+  const vf=document.getElementById('view-form');
+  const cfg=window.NEURO_CONFIG||{};
+  if(!cfg.url||!cfg.anonKey||/TU-PROYECTO|PEGA/.test(cfg.url+cfg.anonKey)){
+    document.getElementById('picker').hidden=true;
+    vf.innerHTML='<section class="card"><div class="done"><b>Falta configurar Supabase</b><span class="note">Edita config.js con la URL y la clave pública (anon) de tu proyecto.</span></div></section>';return;
+  }
+  SB=supabase.createClient(cfg.url,cfg.anonKey);
+  document.getElementById('adminlink').onclick=e=>{e.preventDefault();showLogin();};
+  const {data:{session}}=await SB.auth.getSession();
+  if(!session){document.getElementById('foot').hidden=false;document.getElementById('picker').hidden=false;showForm();return;}
+  await start(session);
+})();
+})();
+</script>
+</body>
+</html>
